@@ -1,0 +1,72 @@
+#include <DHT.h>
+#include <SoftwareSerial.h>
+
+// Pin Definitions
+#define DHTPIN 2
+#define DHTTYPE DHT22
+#define MQ135PIN A0
+
+// Wi-Fi and ThingSpeak Settings
+String apiKey = "YOUR_THINGSPEAK_API_KEY";
+const char* ssid = "YOUR_SSID";
+const char* password = "YOUR_PASSWORD";
+const char* server = "api.thingspeak.com";
+
+// Initialize objects
+DHT dht(DHTPIN, DHTTYPE);
+SoftwareSerial esp8266(10, 11); // RX, TX
+
+void setup() {
+  Serial.begin(9600);
+  esp8266.begin(115200);
+  dht.begin();
+  connectWiFi();
+}
+
+void loop() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  int mq135_raw = analogRead(MQ135PIN);
+
+  // Optional smoothing/filtering can be added here
+
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  sendToThingSpeak(mq135_raw, temperature, humidity);
+  delay(15000); // ThingSpeak requires 15s delay between updates
+}
+
+void connectWiFi() {
+  sendCommand("AT", 1000);
+  sendCommand("AT+CWMODE=1", 1000);
+  sendCommand("AT+CWJAP=\"" + String(ssid) + "\",\"" + String(password) + "\"", 6000);
+}
+
+void sendToThingSpeak(int gasValue, float temp, float hum) {
+  String cmd = "AT+CIPSTART=\"TCP\",\"" + String(server) + "\",80";
+  sendCommand(cmd, 2000);
+
+  String getStr = "GET /update?api_key=" + apiKey +
+                  "&field1=" + String(gasValue) +
+                  "&field2=" + String(temp) +
+                  "&field3=" + String(hum) + "\r\n";
+
+  String sendCmd = "AT+CIPSEND=" + String(getStr.length() + 2);
+  sendCommand(sendCmd, 1000);
+
+  esp8266.print(getStr);
+  delay(1500);
+}
+
+void sendCommand(String cmd, const int timeout) {
+  esp8266.println(cmd);
+  long int time = millis();
+  while ((time + timeout) > millis()) {
+    while (esp8266.available()) {
+      Serial.write(esp8266.read());
+    }
+  }
+}
